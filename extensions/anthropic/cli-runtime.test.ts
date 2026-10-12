@@ -332,12 +332,18 @@ describe("Claude native stdio boundary", () => {
   it.for(["background-bash-captured-stopped", "background-bash-captured-stopped-overlap"])(
     "settles captured 2.1.286 shape for %s with same-process reuse",
     async (scenario, { signal }) => {
+      const barrierReached = createDeferred<void>();
+      const release = createDeferred<CliBackendToolPermissionResult>();
+      const decision = { behavior: "deny" as const, message: "Fixture released." };
       const context = await createContext(scenario, {
         liveSession: createLiveSession(),
-        requestToolPermission: async ({ toolInput }) => ({
-          behavior: "allow",
-          updatedInput: toolInput,
-        }),
+        requestToolPermission: async ({ toolCallId, toolInput }) => {
+          if (toolCallId !== "captured-release") {
+            return { behavior: "allow", updatedInput: toolInput };
+          }
+          barrierReached.resolve();
+          return release.promise;
+        },
       });
       let settled = false;
       const running = collect(context).then((records) => {
@@ -346,10 +352,10 @@ describe("Claude native stdio boundary", () => {
       });
       void running.catch(() => {});
       try {
-        await fixtureReadyBeforeSettlement(context, "background.ready", running, signal);
+        await withinTest(Promise.race([barrierReached.promise, running]), signal);
         expect(settled).toBe(false);
       } finally {
-        await writeFile(path.join(context.cwd, "background.release"), "release");
+        release.resolve(decision);
       }
       const records = await withinTest(running, signal);
       const results = records.filter((record) => record.type === "result");

@@ -450,10 +450,11 @@ for await (const line of createInterface({ input: process.stdin })) {
       const second = { task_id: "captured-second", task_type: "local_bash" };
       send({ type: "system", subtype: "background_tasks_changed", tasks: [first, second] });
       send({ type: "system", subtype: "task_started", ...second, tool_use_id: "captured-second-tool", is_backgrounded: true });
-      writeFileSync("background.ready", "ready");
-      sendReceipt(path.join(process.cwd(), "background.ready"), "ready");
-      while (!existsSync("background.release")) await delay(5);
-      request("captured-stop-first", { subtype: "can_use_tool", tool_name: "TaskStop", input: { task_id: first.task_id }, tool_use_id: "captured-stop-first-tool" });
+      // The test holds this decision until it has observed the turn still open.
+      request("captured-release", { subtype: "can_use_tool", tool_name: "Read",
+        input: { file_path: "fixture.txt" }, tool_use_id: "captured-release" });
+    } else if (id === "captured-release") {
+      request("captured-stop-first", { subtype: "can_use_tool", tool_name: "TaskStop", input: { task_id: "captured-first" }, tool_use_id: "captured-stop-first-tool" });
     } else if (id === "captured-stop-first") {
       assert.equal(response.behavior, "allow");
       const second = { task_id: "captured-second", task_type: "local_bash" };
