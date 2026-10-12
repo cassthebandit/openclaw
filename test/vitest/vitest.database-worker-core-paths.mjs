@@ -1057,6 +1057,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/prepared-model-runtime.gateway-leases.test.ts",
   "src/agents/prepared-model-runtime.inbound-registry.test.ts",
   "src/agents/prepared-model-runtime.native-picker-failures.test.ts",
+  "src/agents/prepared-model-runtime.nested-entry.test.ts",
   "src/agents/prepared-model-runtime.owner-selection.test.ts",
   "src/agents/prepared-model-runtime.owner-supersession.test.ts",
   "src/agents/prepared-model-runtime.published-replacement.test.ts",

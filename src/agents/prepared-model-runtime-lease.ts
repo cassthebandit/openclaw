@@ -238,7 +238,10 @@ export async function acquirePreparedModelRuntimeLeaseFromOwners(
           owner?.pending ? owner.pendingPluginGeneration : owner?.pluginGeneration,
           options.pluginGeneration,
         )) ||
-      (options.catalogMode === "live" && owner?.catalogMode === "static");
+      (options.catalogMode === "live" && owner?.catalogMode === "static") ||
+      // Run owners share a key across config projections (for example cron agent defaults).
+      ((owner?.provenance === "run" || owner?.provenance === "ephemeral") &&
+        !preparedModelRuntimeConfigsMatch(owner.input.config, input.config));
     if (owner?.pending) {
       assertPreparedModelRuntimeAdmissionCanWait(owner);
       admission.claim(key, owner);
