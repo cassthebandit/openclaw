@@ -536,6 +536,43 @@ describe("Claude native stdio boundary", () => {
     },
   );
 
+  it.for([
+    "background-bash-stopped-final",
+    "background-bash-stopped-final-run-ids",
+    "background-bash-stopped-final-slow",
+    "background-bash-stopped-final-slow-run-ids",
+  ])(
+    "accepts the final answer after a TaskStopped auto-backgrounded Bash for %s",
+    async (scenario, { signal }) => {
+      const liveSession = createLiveSession();
+      const context = await createContext(scenario, {
+        liveSession,
+        requestToolPermission: async ({ toolInput }) => ({
+          behavior: "allow",
+          updatedInput: toolInput,
+        }),
+      });
+      // Native sends nothing after this result; holding it would wait for the no-output watchdog.
+      const records = await withinTest(collect(context), signal);
+      const results = records.filter((record) => record.type === "result");
+      expect(results).toHaveLength(1);
+      expect(results[0]).not.toHaveProperty("openclaw_interim_result");
+      expect(records.at(-2)).toMatchObject({
+        type: "assistant",
+        message: { stop_reason: "end_turn" },
+      });
+      const detail = resultDetail(records);
+      expect(detail).toMatchObject({ stoppedBashFinal: true, turn: 1 });
+      const handle = liveSession.current();
+      expect(handle?.isIdle()).toBe(true);
+      const next = resultDetail(
+        await collect({ ...context, prompt: "next input", useResume: true }),
+      );
+      expect(next).toMatchObject({ pid: detail.pid, turn: 2, user: "next input" });
+      expect(liveSession.current()).toBe(handle);
+    },
+  );
+
   it.each([false, true])(
     "distinguishes explicit=%s when Bash first appears backgrounded",
     async (explicit) => {

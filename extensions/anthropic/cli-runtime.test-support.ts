@@ -61,6 +61,10 @@ const firstSeenBackground = scenario === "background-bash-first-seen" || capture
 const explicitBackground = process.env.CLAUDE_FIXTURE_EXPLICIT_BACKGROUND === "1";
 const nativeToolName = scenario === "user-question" ? "AskUserQuestion" : scenario === "mcp-hook" ? "mcp__openclaw__message" : firstSeenBackground ? "Bash" : "Read";
 const nativeToolInput = scenario === "user-question" ? questionInput : firstSeenBackground ? { command: "synthetic long command", run_in_background: explicitBackground } : { file_path: "fixture.txt" };
+const stoppedFinalRun = scenario.endsWith("-run-ids") ? { run_id: "stopped-bash-run" } : {};
+const stoppedFinalPreToolUse = (id, toolName, toolInput) => request(id, { subtype: "hook_callback",
+  callback_id: hooks.PreToolUse[0].hookCallbackIds[0], tool_use_id: id + "-tool",
+  input: { cwd: process.cwd(), hook_event_name: "PreToolUse", tool_name: toolName, tool_input: toolInput, tool_use_id: id + "-tool" } });
 const result = (detail = {}) => send({
   type: "result", subtype: "success", is_error: false,
   result: JSON.stringify({ pid: process.pid, turn, user, privateContext, initialize, argv: process.argv.slice(2), ...detail }),
@@ -172,6 +176,16 @@ for await (const line of createInterface({ input: process.stdin })) {
       send({ type: "result", subtype: "success", is_error: false, num_turns: 3, result: "", session_id: "fixture-session" });
       request("foreground-release", { subtype: "can_use_tool", tool_name: "Read",
         input: { file_path: "fixture.txt" }, tool_use_id: "foreground-release" });
+      continue;
+    }
+    if (scenario.startsWith("background-bash-stopped-final")) {
+      // Captured 2.1.289/2.1.296 stop-work order: a foreground Bash is moved to the
+      // background, TaskStop kills it, the turn keeps working and ends with one result.
+      if (turn > 1) {
+        result();
+        continue;
+      }
+      stoppedFinalPreToolUse("stopped-final-bash", "Bash", { command: "synthetic long command", timeout: 15000 });
       continue;
     }
     if (scenario === "credential-tree") {
@@ -380,6 +394,38 @@ for await (const line of createInterface({ input: process.stdin })) {
       send({ type: "result", subtype: "success", is_error: false, num_turns: 1, stop_reason: "end_turn",
         origin: { kind: "task-notification", producer: "session-task", ...(runIds ? { runId: "agent-run" } : {}) },
         result: JSON.stringify({ pid: process.pid, turn, finalBackgroundAnswer: true }), session_id: "fixture-session" });
+    } else if (id === "stopped-final-bash") {
+      assert.equal(response.hookSpecificOutput.permissionDecision, "allow");
+      const task = { task_id: "stopped-bash", task_type: "local_bash", ...stoppedFinalRun };
+      if (scenario.includes("-slow")) {
+        // A foreground timeout of 3 s or more starts in the foreground, then moves.
+        send({ type: "system", subtype: "task_started", ...task, tool_use_id: "stopped-final-bash-tool", is_backgrounded: false });
+        send({ type: "system", subtype: "background_tasks_changed", tasks: [task] });
+        send({ type: "system", subtype: "task_updated", task_id: task.task_id, ...stoppedFinalRun, patch: { is_backgrounded: true } });
+      } else {
+        // Shorter timeouts are first announced as already backgrounded.
+        send({ type: "system", subtype: "background_tasks_changed", tasks: [task] });
+        send({ type: "system", subtype: "task_started", ...task, tool_use_id: "stopped-final-bash-tool", is_backgrounded: true });
+      }
+      stoppedFinalPreToolUse("stopped-final-stop", "TaskStop", { task_id: task.task_id });
+    } else if (id === "stopped-final-stop") {
+      assert.equal(response.hookSpecificOutput.permissionDecision, "allow");
+      const emptied = () => send({ type: "system", subtype: "background_tasks_changed", tasks: [] });
+      // 2.1.289 empties the task list before the stop receipt; 2.1.296 after it.
+      if (!scenario.endsWith("-run-ids")) emptied();
+      send({ type: "system", subtype: "task_updated", task_id: "stopped-bash", ...stoppedFinalRun, patch: { status: "killed" } });
+      send({ type: "system", subtype: "task_notification", task_id: "stopped-bash", ...stoppedFinalRun,
+        tool_use_id: "stopped-final-bash-tool", status: "stopped" });
+      if (scenario.endsWith("-run-ids")) emptied();
+      stoppedFinalPreToolUse("stopped-final-work", "Bash", { command: "echo more work" });
+    } else if (id === "stopped-final-work") {
+      assert.equal(response.hookSpecificOutput.permissionDecision, "allow");
+      send({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn",
+        content: [{ type: "text", text: "Stopped Bash final answer" }] } });
+      // No notification query follows a stopped task; native stays silent after this result.
+      send({ type: "result", subtype: "success", is_error: false, num_turns: 4, stop_reason: "end_turn",
+        terminal_reason: "completed", result: JSON.stringify({ pid: process.pid, turn, user, stoppedBashFinal: true }),
+        session_id: "fixture-session" });
     } else if (id === "elicitation") {
       result({ elicitation: response });
     } else if (id.startsWith("prior-")) {
