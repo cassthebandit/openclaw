@@ -40,7 +40,7 @@ export function recordTaskOwnership(
 ): string | undefined {
   const taskId = task.task_id;
   if (typeof taskId !== "string" || !taskId) {
-    return;
+    return undefined;
   }
   const previous = session.taskOwners.get(taskId);
   const owner =

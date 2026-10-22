@@ -14,7 +14,7 @@ import {
   type FixtureReceiptChannel,
 } from "openclaw/plugin-sdk/test-fixtures";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { CLAUDE_PROTOCOL_FIXTURE } from "./cli-runtime.protocol-fixture.js";
+import { CLAUDE_PROTOCOL_FIXTURE } from "./cli-runtime.protocol.test-support.js";
 import {
   collectClaudeCli,
   createCliTestHarness,
