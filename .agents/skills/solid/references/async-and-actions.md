@@ -403,8 +403,10 @@ not freeze those live values or leave the title behind `aria-label` and disabled
 
 ### Command errors without optimistic state
 
-Some plugin commands already expose their busy state through a shared owner.
-They need no presentation action merely to show an error. WhatsApp Settings
+Some commands already expose their busy state through a shared owner.
+They need no presentation action merely to show an error. The browser dashboard
+keeps request admission synchronous and projects its existing pending fact for
+button state; no predicted value needs an optimistic action. WhatsApp Settings
 stores the admitted command's completion promise and reads it under `Errored`:
 
 ```tsx
