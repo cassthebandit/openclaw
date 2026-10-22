@@ -165,6 +165,11 @@ updates or park card-local popovers. New selections consume ordinary readiness a
 show the existing loading fallback. Keep selection identity in the plain owner;
 do not synchronize a second accepted-selection snapshot in the renderer.
 
+A provider row's failure badge does not replace the catalog error boundary's
+Retry action. Keep that actionable error slot unless the row exposes the same
+owner retry. Do not suppress a completion error just because a row also reports
+failure.
+
 ## Mutate with an optimistic presentation
 
 Use a generator action to retain the transition context across async work.
@@ -430,6 +435,10 @@ leave the previous `Errored` fallback visible throughout retry. Search test and
 Workboard delete feedback keep the read live; their held-retry tests verify that
 the old alert clears before the replacement operation settles. A local error string written by each completion
 would lose that ordering and require a second request-generation guard.
+
+For dismissible command feedback, key each outcome by its admitted completion
+promise. Message text or a shared draft identity can suppress an identical failure
+on a later attempt.
 
 The user-action outcome also owns lazy dialog import, registration, and preparation.
 A catch that starts after `await showConfirmDialog(...)` or `showInputDialog(...)`
