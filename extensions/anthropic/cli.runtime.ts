@@ -378,11 +378,11 @@ function recordTaskOwnership(
   const owner =
     task.owned_by_subagent === true
       ? false
-      : previous ??
+      : (previous ??
         (typeof task.parent_task_id === "string"
           ? session.taskOwners.get(task.parent_task_id)
           : undefined) ??
-        inputUuid;
+        inputUuid);
   if (owner !== previous) {
     session.taskOwners.set(taskId, owner);
   }
@@ -528,10 +528,7 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
       turn.pendingBackgroundTaskIds.delete(taskId);
       turn.foregroundTaskIds.delete(taskId);
       turn.taskNotifications.delete(taskId);
-    } else if (
-      turn.foregroundTaskIds.has(taskId) &&
-      !turn.pendingBackgroundTaskIds.has(taskId)
-    ) {
+    } else if (turn.foregroundTaskIds.has(taskId) && !turn.pendingBackgroundTaskIds.has(taskId)) {
       turn.foregroundTaskIds.delete(taskId);
     } else {
       // Older inputs still consume their own ordered notification result.
@@ -546,8 +543,7 @@ async function acceptMessage(session: ClaudeCliSession, message: Record<string, 
       (typeof message.subtype === "string" && message.subtype.startsWith("error")) ||
       (typeof message.result === "string" && hasClaudeRawToolInvocation(message.result));
     const origin = isRecord(message.origin) ? message.origin : undefined;
-    const taskNotification =
-      origin?.kind === "task-notification" && origin.subkind === undefined;
+    const taskNotification = origin?.kind === "task-notification" && origin.subkind === undefined;
     const runTaskId =
       taskNotification && typeof origin?.runId === "string"
         ? session.taskRuns.get(origin.runId)
