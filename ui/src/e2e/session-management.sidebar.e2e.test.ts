@@ -6,9 +6,11 @@ import {
   waitForControlUiGatewayReconnecting,
 } from "../test-helpers/control-ui-e2e-readiness.ts";
 import { controlUiBundledSettingsStorageKey } from "../test-helpers/control-ui-e2e.ts";
+import { navigationDrawerToggle } from "../test-helpers/control-ui-navigation.ts";
 import { createControlUiSessionRow as sessionRow } from "../test-helpers/control-ui-session-fixtures.ts";
 import { expectRequestCountStable } from "./chat-flow.test-support.ts";
 import { createControlUiE2eContextOptions } from "./control-ui-e2e-suite.test-support.ts";
+import { replaceGatewayClient } from "./new-session-page.test-support.ts";
 import {
   actionOpacity,
   actionPointerEvents,
@@ -134,6 +136,10 @@ suite.define(() => {
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, parentKey));
       const parent = page.locator(`[data-session-key="${parentKey}"]`);
       await parent.waitFor({ state: "visible", timeout: 10_000 });
+      // Children that already exist at load stay collapsed; only new children reveal.
+      const initialToggle = parent.locator("[data-child-session-toggle]");
+      await initialToggle.waitFor();
+      expect(await initialToggle.getAttribute("aria-expanded")).toBe("false");
       await expect.poll(() => page.locator(".sidebar-recent-session--child").count()).toBe(0);
       // Delegated work keeps the idle parent's ring visible even with children collapsed.
       await expect
@@ -165,8 +171,10 @@ suite.define(() => {
       const childRows = page.locator(".sidebar-recent-session--child");
       await expect.poll(() => childRows.count()).toBe(4);
       expect(await childRows.locator("[data-sidebar-session-archive]").count()).toBe(4);
-      await childRows.nth(0).getByRole("img", { name: "Active run" }).waitFor();
-      await childRows.nth(1).getByRole("img", { name: "Done" }).waitFor();
+      const activeChild = page.locator(`[data-session-key="${childOneKey}"]`);
+      const completedChild = page.locator(`[data-session-key="${childTwoKey}"]`);
+      await activeChild.getByRole("img", { name: "Active run" }).waitFor();
+      await completedChild.getByRole("img", { name: "Done" }).waitFor();
 
       const staleRunningChild = page.locator(`[data-session-key="${staleRunningChildKey}"]`);
       const failedChild = page.locator(`[data-session-key="${failedChildKey}"]`);
@@ -217,7 +225,6 @@ suite.define(() => {
       expect(nesting.childLeft - nesting.parentLeft).toBeGreaterThan(8);
       expect(nesting.guide).toBe("none");
 
-      const completedChild = childRows.nth(1);
       const childArchiveButton = completedChild.getByRole("button", {
         name: "Archive session: Verify tests",
         exact: true,
@@ -247,7 +254,7 @@ suite.define(() => {
       await page.keyboard.press("Escape");
       await childMenu.waitFor({ state: "detached" });
 
-      await childRows.nth(1).getByRole("link").click();
+      await completedChild.getByRole("link").click();
       await expect.poll(() => new URL(page.url()).pathname).toBe(controlUiSessionPath(childTwoKey));
     } finally {
       await context.close();
@@ -286,11 +293,8 @@ suite.define(() => {
       );
       const shell = page.locator(".shell");
       const shellNav = page.locator(".shell-nav");
-      const collapseButton = page.locator('[data-navigation-view][aria-pressed="true"]');
-      const expandButton = page.locator(".shell-chrome-controls__nav-toggle");
-      const drawerToggle = page
-        .locator(".topbar-nav-toggle:visible, .chat-pane__nav-toggle:visible")
-        .first();
+      const sidebarToggle = page.locator('[data-navigation-view="sessions"]');
+      const drawerToggle = navigationDrawerToggle(page);
       const sessionMenu = page.getByRole("menu", { name: "Actions for Research notes" });
       await row.waitFor({ state: "visible", timeout: 10_000 });
 
@@ -305,9 +309,9 @@ suite.define(() => {
       const expectDesktopCollapsed = async () => {
         await expect.poll(() => sidebar.locator(".sidebar-shell").isVisible()).toBe(false);
         await expect.poll(() => sidebar.locator(".sidebar-rail").isVisible()).toBe(true);
-        await expect.poll(() => expandButton.isVisible()).toBe(true);
+        await expect.poll(() => sidebarToggle.isVisible()).toBe(true);
         await expect
-          .poll(() => expandButton.evaluate((element) => element === document.activeElement))
+          .poll(() => sidebarToggle.evaluate((element) => element === document.activeElement))
           .toBe(true);
       };
       const expectDrawerClosed = async () => {
@@ -352,15 +356,15 @@ suite.define(() => {
       await expect.poll(() => sessionMenu.count()).toBe(0);
       await expectHiddenShortcutsInert(beforeKeyboardCollapse);
 
-      await expandButton.click();
+      await sidebarToggle.click();
       await expect.poll(() => sidebar.locator(".sidebar-shell").isVisible()).toBe(true);
 
       // The visible desktop control follows the same focus handoff contract.
       await openSessionMenu();
-      await collapseButton.click();
+      await sidebarToggle.click();
       await expectDesktopCollapsed();
       await expect.poll(() => sessionMenu.count()).toBe(0);
-      await expandButton.click();
+      await sidebarToggle.click();
       await expect.poll(() => sidebar.locator(".sidebar-shell").isVisible()).toBe(true);
 
       // Crossing into drawer layout hides the desktop sidebar without toggling
@@ -513,7 +517,7 @@ suite.define(() => {
     }
   });
 
-  it("keeps sidebar sessions visible through transport and client replacement reconnects", async () => {
+  it("retains sidebar sessions through transport loss and reloads them after client replacement", async () => {
     const context = await suite.browser.newContext(createControlUiE2eContextOptions());
     const page = await context.newPage();
     const sessionKey = "agent:main:disconnect-proof";
@@ -554,12 +558,9 @@ suite.define(() => {
       await expect
         .poll(() => gateway.getSocketCount(), { timeout: 15_000 })
         .toBe(socketsBefore + 1);
-      await page.locator(".sidebar-identity-card").click();
-      const retryConnection = page.locator(
-        'wa-dropdown.sidebar-identity-menu wa-dropdown-item[value="command:retry-connect"]',
-      );
-      await retryConnection.waitFor({ state: "visible", timeout: 10_000 });
-      await retryConnection.click();
+      const reconnectSocketCount = await gateway.getSocketCount();
+      await replaceGatewayClient(page);
+      await expect.poll(() => gateway.getSocketCount()).toBeGreaterThan(reconnectSocketCount);
       await expect.poll(() => pinnedEntry.count()).toBe(1);
       await captureUiProof(suite, page, "sidebar-sessions-during-client-replacement.png");
 
@@ -581,11 +582,12 @@ suite.define(() => {
         })
         .toBeGreaterThan(reconnectPreviewCount);
       await sidebarRow.waitFor({ state: "visible" });
-      expect(await sidebarRows.count()).toBe(3);
+      // A replacement client retires membership; only the fresh route descriptor is ready.
+      expect(await sidebarRows.count()).toBe(1);
       for (const otherKey of otherSessionKeys) {
-        await page
-          .locator(`.sidebar-recent-session[data-session-key="${otherKey}"]`)
-          .waitFor({ state: "visible" });
+        expect(
+          await page.locator(`.sidebar-recent-session[data-session-key="${otherKey}"]`).count(),
+        ).toBe(0);
       }
 
       const firstReconnectListCount = (await gateway.getRequests("sessions.list", rosterMatch))
@@ -828,7 +830,7 @@ suite.define(() => {
         suite,
         page,
         "sidebar-session-dropped-into-pinned.png",
-        page.locator('openclaw-session-menu > wa-dropdown [part="menu"]'),
+        page.locator("openclaw-session-menu .session-menu__panel"),
         [page.getByRole("menuitem", { name: "Unpin session" })],
       );
     } finally {
@@ -977,7 +979,11 @@ suite.define(() => {
         .locator('[data-session-section="ungrouped"]')
         .getByRole("button", { name: "Show more" });
       for (let pageIndex = 0; pageIndex < 3 && (await loadMore.isVisible()); pageIndex += 1) {
+        const visibleRows = await page.locator(".sidebar-recent-session").count();
         await loadMore.click();
+        await expect
+          .poll(() => page.locator(".sidebar-recent-session").count())
+          .toBeGreaterThan(visibleRows);
       }
       await page.locator(".sidebar-shell__body").evaluate((element) => {
         element.scrollTop = 0;
